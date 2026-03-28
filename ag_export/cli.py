@@ -94,15 +94,33 @@ def _cleanup_symlinks(symlinks: list[Path]):
 
 
 def _gather_conversations(port: int, csrf: str) -> list[dict]:
-    """Fetch all conversation summaries from the API."""
-    summaries = get_all_trajectories(port, csrf)
-    if not summaries:
-        return []
+    """Fetch all conversation summaries from the API and physical files."""
+    summaries = get_all_trajectories(port, csrf) or {}
+
+    all_ids = set(summaries.keys())
+    for d in [CONVERSATIONS_DIR, IMPLICIT_DIR]:
+        if d.exists():
+            for pb in d.glob("*.pb"):
+                all_ids.add(pb.stem)
 
     conversations = []
-    for cascade_id, meta in summaries.items():
+    for cascade_id in all_ids:
+        meta = summaries.get(cascade_id, {})
         title = meta.get("title", "")
-        step_count = meta.get("stepCount", 0)
+        # Use 10000 as a safe default for step_count if unknown
+        step_count = meta.get("stepCount", 10000)
+
+        if not meta.get("lastModifiedTime"):
+            pb_path = CONVERSATIONS_DIR / f"{cascade_id}.pb"
+            if not pb_path.exists():
+                pb_path = IMPLICIT_DIR / f"{cascade_id}.pb"
+            if pb_path.exists():
+                try:
+                    mtime = pb_path.stat().st_mtime
+                    meta["lastModifiedTime"] = datetime.fromtimestamp(mtime).isoformat() + "Z"
+                except OSError:
+                    pass
+
         conversations.append({
             "cascade_id": cascade_id,
             "title": title,
